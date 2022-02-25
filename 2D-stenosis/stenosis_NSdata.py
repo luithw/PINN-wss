@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import torch.nn as nn
 import torch.optim as optim
@@ -10,12 +12,9 @@ from vtk.util import numpy_support as VN
 
 
 device = torch.device("cuda")
-Flag_batch = True
-Flag_BC_exact = False
-Lambda_BC  = 20.
+Lambda_BC = 20.
 Lambda_data = 1.
 
-#Directory = "/home/aa3878/Data/ML/Amir/stenosis/"
 Directory = "/home/hwlui/development/PINN-wss/Data/2D-stenosis/"
 mesh_file = Directory + "sten_mesh000000.vtu"
 bc_file_in = Directory + "inlet_BC.vtk"
@@ -24,12 +23,11 @@ File_data = Directory + "velocity_sten_steady.vtu"
 fieldname = 'f_5-0' #The velocity field name in the vtk file (see from ParaView)
 
 batchsize = 256
-epochs  = 5500
+# epochs = 5500
+epochs = 20
 Diff = 0.001
 rho = 1.
 T = 0.5 #total duraction
-#nPt_time = 50 #number of time-steps
-
 Flag_x_length = True #if True scales the eqn such that the length of the domain is = X_scale
 X_scale = 2.0 #The length of the  domain (need longer length for separation region)
 Y_scale = 1.0
@@ -45,12 +43,15 @@ yEnd = 1.0
 delta_circ = 0.2
 h_n = 128  # Width for u,v,p
 input_n = 2  # this is what our answer is a function of (x,y)
-n_hid = [input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
+n_hid = [input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 3]
 learning_rate = 5e-4 #starting learning rate
 step_epoch = 1200 #1000
 decay_rate = 0.1 # 0.1
 path = "Results/"
-N_Layers = 9
+
+# MSE LOSS
+mse = nn.MSELoss()
+
 
 def load_data():
     print('Loading', mesh_file)
@@ -99,8 +100,6 @@ def load_data():
         VTKpoints.InsertPoint(i, pt_iso[0], pt_iso[1], pt_iso[2])
     point_data = vtk.vtkUnstructuredGrid()
     point_data.SetPoints(VTKpoints)
-    xb_in = np.reshape(x_vtk_mesh, (np.size(x_vtk_mesh[:]), 1))
-    yb_in = np.reshape(y_vtk_mesh, (np.size(y_vtk_mesh[:]), 1))
 
     print('Loading', bc_file_wall)
     reader = vtk.vtkUnstructuredGridReader()
@@ -185,16 +184,21 @@ def load_data():
 def plot_results(x, y, output_u, output_v):
     plt.figure()
     plt.subplot(2, 1, 1)
-    plt.scatter(x.detach().numpy(), y.detach().numpy(), c=output_u, cmap='rainbow')
+    plt.scatter(x, y, c=output_u, cmap='rainbow')
     plt.title('NN results, u')
     plt.colorbar()
-    plt.show()
+    plt.savefig('results_u.png', dpi=500)
+    plt.clf()
+    plt.close()
+
     plt.figure()
     plt.subplot(2, 1, 1)
-    plt.scatter(x.detach().numpy(), y.detach().numpy(), c=output_v, cmap='rainbow')
+    plt.scatter(x, y, c=output_v, cmap='rainbow')
     plt.title('NN results, v')
     plt.colorbar()
-    plt.show()
+    plt.savefig('results_v.png', dpi=500)
+    plt.clf()
+    plt.close()
 
 class Swish(nn.Module):
     def __init__(self, inplace=True):
@@ -208,6 +212,7 @@ class Swish(nn.Module):
         else:
             return x * torch.sigmoid(x)
 
+
 def create_model():
     layers = []
     for i in range(len(n_hid) - 1):
@@ -216,11 +221,52 @@ def create_model():
         layer = nn.Linear(n_hid[i], n_hid[i + 1])
         nn.init.kaiming_normal_(layer.weight)
         layers.append(layer)
-
     pinn = nn.Sequential(*layers)
     pinn.to(device)
     return pinn
 
+
+def residual(pinn, x, y):
+    x.requires_grad = True
+    y.requires_grad = True
+    outputs = pinn(torch.cat((x, y), 1))
+    u = outputs[:, [0]]
+    v = outputs[:, [1]]
+    p = outputs[:, [2]]
+
+    u_x = torch.autograd.grad(u, x, grad_outputs=torch.ones_like(x), create_graph=True, only_inputs=True)[0]
+    u_xx = torch.autograd.grad(u_x, x, grad_outputs=torch.ones_like(x), create_graph=True, only_inputs=True)[0]
+    u_y = torch.autograd.grad(u, y, grad_outputs=torch.ones_like(y), create_graph=True, only_inputs=True)[0]
+    u_yy = torch.autograd.grad(u_y, y, grad_outputs=torch.ones_like(y), create_graph=True, only_inputs=True)[0]
+    v_x = torch.autograd.grad(v, x, grad_outputs=torch.ones_like(x), create_graph=True, only_inputs=True)[0]
+    v_xx = torch.autograd.grad(v_x, x, grad_outputs=torch.ones_like(x), create_graph=True, only_inputs=True)[0]
+    v_y = torch.autograd.grad(v, y, grad_outputs=torch.ones_like(y), create_graph=True, only_inputs=True)[0]
+    v_yy = torch.autograd.grad(v_y, y, grad_outputs=torch.ones_like(y), create_graph=True, only_inputs=True)[0]
+    p_x = torch.autograd.grad(p, x, grad_outputs=torch.ones_like(x), create_graph=True, only_inputs=True)[0]
+    p_y = torch.autograd.grad(p, y, grad_outputs=torch.ones_like(y), create_graph=True, only_inputs=True)[0]
+
+    XX_scale = U_scale * (X_scale**2)
+    YY_scale = U_scale * (Y_scale**2)
+    UU_scale = U_scale ** 2
+
+    loss_1 = u*v_x / X_scale + v*v_y / Y_scale - Diff*(v_xx/XX_scale + v_yy / YY_scale) + 1/rho * (p_y / (Y_scale * UU_scale)) #Y-dir
+    loss_2 = u*u_x / X_scale + v*u_y / Y_scale - Diff*(u_xx/XX_scale + u_yy / YY_scale) + 1/rho * (p_x / (X_scale * UU_scale))  #X-dir
+    loss_3 = (u_x / X_scale + v_y / Y_scale) #continuity
+    return (loss_1 ** 2).mean() + (loss_2 ** 2).mean() + (loss_3 ** 2).mean()
+
+
+def boundary(pinn, xb, yb):
+    outputs = pinn(torch.cat((xb, yb), 1))
+    u = outputs[:, [0]]
+    v = outputs[:, [1]]
+    return (u**2).mean() + (v**2).mean()
+
+
+def regression(pinn, xd, yd, ud, vd):
+    outputs = pinn(torch.cat((xd, yd), 1))
+    u = outputs[:, [0]]
+    v = outputs[:, [1]]
+    return mse(u, ud) + mse(v, vd)
 
 def geo_train():
     x_in, y_in, xb, yb, ub, vb, xd, yd, ud, vd = load_data()
@@ -234,117 +280,47 @@ def geo_train():
     vd = torch.Tensor(vd).to(device)
     dataset = TensorDataset(x, y)
     dataloader = DataLoader(dataset, batch_size=batchsize, shuffle=True, num_workers=0, drop_last=True)
-    net_u = create_model().to(device)
-    net_v = create_model().to(device)
-    net_p = create_model().to(device)
-
-    def criterion(x, y):
-        x.requires_grad = True
-        y.requires_grad = True
-        net_in = torch.cat((x, y), 1)
-        u = net_u(net_in)
-        u = u.view(len(u), -1)
-        v = net_v(net_in)
-        v = v.view(len(v), -1)
-        P = net_p(net_in)
-        P = P.view(len(P), -1)
-
-        u_x = torch.autograd.grad(u,x,grad_outputs=torch.ones_like(x),create_graph = True,only_inputs=True)[0]
-        u_xx = torch.autograd.grad(u_x,x,grad_outputs=torch.ones_like(x),create_graph = True,only_inputs=True)[0]
-        u_y = torch.autograd.grad(u,y,grad_outputs=torch.ones_like(y),create_graph = True,only_inputs=True)[0]
-        u_yy = torch.autograd.grad(u_y,y,grad_outputs=torch.ones_like(y),create_graph = True,only_inputs=True)[0]
-        v_x = torch.autograd.grad(v,x,grad_outputs=torch.ones_like(x),create_graph = True,only_inputs=True)[0]
-        v_xx = torch.autograd.grad(v_x,x,grad_outputs=torch.ones_like(x),create_graph = True,only_inputs=True)[0]
-        v_y = torch.autograd.grad(v,y,grad_outputs=torch.ones_like(y),create_graph = True,only_inputs=True)[0]
-        v_yy = torch.autograd.grad(v_y,y,grad_outputs=torch.ones_like(y),create_graph = True,only_inputs=True)[0]
-
-        P_x = torch.autograd.grad(P,x,grad_outputs=torch.ones_like(x),create_graph = True,only_inputs=True)[0]
-        P_y = torch.autograd.grad(P,y,grad_outputs=torch.ones_like(y),create_graph = True,only_inputs=True)[0]
-
-        XX_scale = U_scale * (X_scale**2)
-        YY_scale = U_scale * (Y_scale**2)
-        UU_scale  = U_scale ** 2
-
-        loss_2 = u*u_x / X_scale + v*u_y / Y_scale - Diff*( u_xx/XX_scale  + u_yy /YY_scale  )+ 1/rho* (P_x / (X_scale*UU_scale)   )  #X-dir
-        loss_1 = u*v_x / X_scale + v*v_y / Y_scale - Diff*( v_xx/ XX_scale + v_yy / YY_scale )+ 1/rho*(P_y / (Y_scale*UU_scale)   ) #Y-dir
-        loss_3 = (u_x / X_scale + v_y / Y_scale) #continuity
-
-        # MSE LOSS
-        loss_f = nn.MSELoss()
-
-        #Note our target is zero. It is residual so we use zeros_like
-        loss = loss_f(loss_1,torch.zeros_like(loss_1))+  loss_f(loss_2,torch.zeros_like(loss_2))+  loss_f(loss_3,torch.zeros_like(loss_3))
-        return loss
-
-    def Loss_BC(xb, yb):
-        net_in1 = torch.cat((xb, yb), 1)
-        out1_u = net_u(net_in1)
-        out1_v = net_v(net_in1)
-        out1_u = out1_u.view(len(out1_u), -1)
-        out1_v = out1_v.view(len(out1_v), -1)
-        loss_f = nn.MSELoss()
-        loss_noslip = loss_f(out1_u, torch.zeros_like(out1_u)) + loss_f(out1_v, torch.zeros_like(out1_v))
-        return loss_noslip
-
-    def Loss_data(xd, yd, ud, vd):
-        net_in1 = torch.cat((xd, yd), 1)
-        out1_u = net_u(net_in1)
-        out1_v = net_v(net_in1)
-        out1_u = out1_u.view(len(out1_u), -1)
-        out1_v = out1_v.view(len(out1_v), -1)
-        loss_f = nn.MSELoss()
-        loss_d = loss_f(out1_u, ud) + loss_f(out1_v, vd)
-        return loss_d
-
-    ############################################################################
-    optimizer_u = optim.Adam(net_u.parameters(), lr=learning_rate, betas=(0.9, 0.99), eps=10**-15)
-    optimizer_v = optim.Adam(net_v.parameters(), lr=learning_rate, betas=(0.9, 0.99), eps=10**-15)
-    optimizer_p = optim.Adam(net_p.parameters(), lr=learning_rate, betas=(0.9, 0.99), eps=10**-15)
-    scheduler_u = torch.optim.lr_scheduler.StepLR(optimizer_u, step_size=step_epoch, gamma=decay_rate)
-    scheduler_v = torch.optim.lr_scheduler.StepLR(optimizer_v, step_size=step_epoch, gamma=decay_rate)
-    scheduler_p = torch.optim.lr_scheduler.StepLR(optimizer_p, step_size=step_epoch, gamma=decay_rate)
+    pinn = create_model().to(device)
+    opt = optim.Adam(pinn.parameters(), lr=learning_rate, betas=(0.9, 0.99), eps=10**-15)
+    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=step_epoch, gamma=decay_rate)
 
     # Main loop
     tic = time.time()
     for epoch in range(epochs):
-        loss_eqn_tot = 0.
-        loss_bc_tot = 0.
-        loss_data_tot = 0.
+        residual_loss_tot = 0.
+        mse_b_tot = 0.
+        mse_0_tot = 0.
         n = 0
-        for batch_idx, (x_in,y_in) in enumerate(dataloader):
-            net_u.zero_grad()
-            net_v.zero_grad()
-            net_p.zero_grad()
-            loss_eqn = criterion(x_in, y_in)
-            loss_bc = Loss_BC(xb, yb)
-            loss_data = Loss_data(xd, yd, ud, vd)
-            loss = loss_eqn + Lambda_BC * loss_bc + Lambda_data*loss_data
+        for batch_idx, (x_batch, y_batch) in enumerate(dataloader):
+            pinn.zero_grad()
+            residual_loss = residual(pinn, x_batch, y_batch)
+            mse_b = boundary(pinn, xb, yb)
+            mse_0 = regression(pinn, xd, yd, ud, vd)
+            loss = residual_loss + Lambda_BC * mse_b + Lambda_data*mse_0
             loss.backward()
-            optimizer_u.step()
-            optimizer_v.step()
-            optimizer_p.step()
-            loss_eqn_tot += loss_eqn
-            loss_bc_tot += loss_bc
-            loss_data_tot += loss_data
+            opt.step()
+            residual_loss_tot += residual_loss
+            mse_b_tot += mse_b
+            mse_0_tot += mse_0
             n += 1
             if batch_idx % 40 == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss eqn {:.10f} Loss BC {:.8f} Loss data {:.8f}'.format(
-                    epoch, batch_idx * len(x_in), len(dataloader.dataset),
-                    100. * batch_idx / len(dataloader), loss_eqn.item(), loss_bc.item(),loss_data.item()))
-            scheduler_u.step()
-            scheduler_v.step()
-            scheduler_p.step()
-        loss_eqn_tot /= n
-        loss_bc_tot /= n
-        loss_data_tot /= n
-        print('*****Total avg Loss : Loss eqn {:.10f} Loss BC {:.10f} Loss data {:.10f} ****'.format(loss_eqn_tot, loss_bc_tot,loss_data_tot) )
-        print('learning rate is ', optimizer_u.param_groups[0]['lr'], optimizer_v.param_groups[0]['lr'])
+                print('Train Epoch: %i [%i/%i (%.0f %%)] - residual_loss %.10f mse_b %.8f mse_0 %.8f' %
+                      (epoch, batch_idx * len(x_batch), len(dataloader.dataset),
+                    100. * batch_idx / len(dataloader), residual_loss.item(), mse_b.item(), mse_0.item()))
+            scheduler.step()
+        residual_loss_tot /= n
+        mse_b_tot /= n
+        mse_0_tot /= n
+        print('*****Total avg Loss : residual_loss %.10f mse_b %.8f mse_0 %.8f ****' %
+              (residual_loss_tot, mse_b_tot, mse_0_tot))
+        print('learning rate is: %.8f' % opt.param_groups[0]['lr'])
 
-    print("elapse time in parallel = ", time.time() - tic)
+    print("elapse time in parallel = %i" % (time.time() - tic))
     net_in = torch.cat((x.requires_grad_(), y.requires_grad_()), 1)
-    output_u = net_u(net_in).cpu().data.numpy()  #evaluate model (runs out of memory for large GPU problems!)
-    output_v = net_v(net_in).cpu().data.numpy()  #evaluate model
-    plot_results(x_in, y_in, output_u, output_v)
+    outputs = pinn(net_in).cpu().data.numpy()  #evaluate model (runs out of memory for large GPU problems!)
+    u = outputs[:, [0]]
+    v = outputs[:, [1]]
+    plot_results(x_in, y_in, u, v)
     return
 
 
