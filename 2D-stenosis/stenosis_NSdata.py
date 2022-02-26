@@ -13,7 +13,7 @@ from vtk.util import numpy_support as VN
 
 batchsize = 256
 # epochs = 5500
-epochs = 1
+epochs = 30
 learning_rate = 5e-4 #starting learning rate
 step_epoch = 1200 #1000
 decay_rate = 0.1 # 0.1
@@ -237,7 +237,6 @@ def geo_train():
         residual_loss_tot = 0.
         mse_b_tot = 0.
         mse_0_tot = 0.
-        n = 0
         for batch_idx, (x_batch, y_batch) in enumerate(dataloader):
             pinn.zero_grad()
             residual_loss = residual(pinn, x_batch, y_batch)
@@ -249,15 +248,14 @@ def geo_train():
             residual_loss_tot += residual_loss
             mse_b_tot += mse_b
             mse_0_tot += mse_0
-            n += 1
             if batch_idx % 40 == 0:
                 print('Train Epoch: %i [%i/%i (%.0f %%)] - residual_loss %.10f mse_b %.8f mse_0 %.8f' %
                       (epoch, batch_idx * len(x_batch), len(dataloader.dataset),
                     100. * batch_idx / len(dataloader), residual_loss.item(), mse_b.item(), mse_0.item()))
             scheduler.step()
-        residual_loss_tot /= n
-        mse_b_tot /= n
-        mse_0_tot /= n
+        residual_loss_tot /= len(dataloader)
+        mse_b_tot /= len(dataloader)
+        mse_0_tot /= len(dataloader)
         print('*****Total avg Loss : residual_loss %.10f mse_b %.8f mse_0 %.8f ****' %
               (residual_loss_tot, mse_b_tot, mse_0_tot))
         print('learning rate is: %.8f' % opt.param_groups[0]['lr'])
