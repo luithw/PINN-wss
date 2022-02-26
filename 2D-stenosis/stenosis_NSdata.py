@@ -11,7 +11,15 @@ import vtk
 from vtk.util import numpy_support as VN
 
 
+batchsize = 256
+# epochs = 5500
+epochs = 1
+learning_rate = 5e-4 #starting learning rate
+step_epoch = 1200 #1000
+decay_rate = 0.1 # 0.1
+n_hid = [2, 128, 128, 128, 128, 128, 128, 128, 128, 128, 3]
 device = torch.device("cuda")
+
 Lambda_BC = 20.
 Lambda_data = 1.
 
@@ -22,32 +30,12 @@ bc_file_wall = Directory + "wall_BC.vtk"
 File_data = Directory + "velocity_sten_steady.vtu"
 fieldname = 'f_5-0' #The velocity field name in the vtk file (see from ParaView)
 
-batchsize = 256
-# epochs = 5500
-epochs = 20
 Diff = 0.001
 rho = 1.
-T = 0.5 #total duraction
-Flag_x_length = True #if True scales the eqn such that the length of the domain is = X_scale
 X_scale = 2.0 #The length of the  domain (need longer length for separation region)
 Y_scale = 1.0
 U_scale = 1.0
-U_BC_in = 0.5
-Lambda_div = 1.  #penalty factor for continuity eqn (Makes it worse!?)
-Lambda_v = 1.  #penalty factor for y-momentum equation
-nPt = 130
-xStart = 0.
-xEnd = 1.
-yStart = 0.
-yEnd = 1.0
-delta_circ = 0.2
-h_n = 128  # Width for u,v,p
-input_n = 2  # this is what our answer is a function of (x,y)
-n_hid = [input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 3]
-learning_rate = 5e-4 #starting learning rate
-step_epoch = 1200 #1000
-decay_rate = 0.1 # 0.1
-path = "Results/"
+
 
 # MSE LOSS
 mse = nn.MSELoss()
@@ -61,45 +49,12 @@ def load_data():
     data_vtk = reader.GetOutput()
     n_points = data_vtk.GetNumberOfPoints()
     print('n_points of the mesh:', n_points)
-    x_vtk_mesh = np.zeros((n_points, 1))
-    y_vtk_mesh = np.zeros((n_points, 1))
-    VTKpoints = vtk.vtkPoints()
+    x = np.zeros((n_points, 1))
+    y = np.zeros((n_points, 1))
     for i in range(n_points):
         pt_iso = data_vtk.GetPoint(i)
-        x_vtk_mesh[i] = pt_iso[0]
-        y_vtk_mesh[i] = pt_iso[1]
-        VTKpoints.InsertPoint(i, pt_iso[0], pt_iso[1], pt_iso[2])
-
-    point_data = vtk.vtkUnstructuredGrid()
-    point_data.SetPoints(VTKpoints)
-
-    x = np.reshape(x_vtk_mesh, (np.size(x_vtk_mesh[:]), 1))
-    y = np.reshape(y_vtk_mesh, (np.size(y_vtk_mesh[:]), 1))
-
-    t = np.linspace(0., T, nPt * nPt)
-    t = t.reshape(-1, 1)
-    print('shape of x', x.shape)
-    print('shape of y', y.shape)
-    # print('shape of t',t.shape)
-
-    ## Define boundary points
-    print('Loading', bc_file_in)
-    reader = vtk.vtkUnstructuredGridReader()
-    reader.SetFileName(bc_file_in)
-    reader.Update()
-    data_vtk = reader.GetOutput()
-    n_points = data_vtk.GetNumberOfPoints()
-    print('n_points of at inlet', n_points)
-    x_vtk_mesh = np.zeros((n_points, 1))
-    y_vtk_mesh = np.zeros((n_points, 1))
-    VTKpoints = vtk.vtkPoints()
-    for i in range(n_points):
-        pt_iso = data_vtk.GetPoint(i)
-        x_vtk_mesh[i] = pt_iso[0]
-        y_vtk_mesh[i] = pt_iso[1]
-        VTKpoints.InsertPoint(i, pt_iso[0], pt_iso[1], pt_iso[2])
-    point_data = vtk.vtkUnstructuredGrid()
-    point_data.SetPoints(VTKpoints)
+        x[i] = pt_iso[0]
+        y[i] = pt_iso[1]
 
     print('Loading', bc_file_wall)
     reader = vtk.vtkUnstructuredGridReader()
@@ -108,86 +63,71 @@ def load_data():
     data_vtk = reader.GetOutput()
     n_pointsw = data_vtk.GetNumberOfPoints()
     print('n_points of at wall', n_pointsw)
-    x_vtk_mesh = np.zeros((n_pointsw, 1))
-    y_vtk_mesh = np.zeros((n_pointsw, 1))
-    VTKpoints = vtk.vtkPoints()
+    xb = np.zeros((n_pointsw, 1))
+    yb = np.zeros((n_pointsw, 1))
     for i in range(n_pointsw):
         pt_iso = data_vtk.GetPoint(i)
-        x_vtk_mesh[i] = pt_iso[0]
-        y_vtk_mesh[i] = pt_iso[1]
-        VTKpoints.InsertPoint(i, pt_iso[0], pt_iso[1], pt_iso[2])
-    point_data = vtk.vtkUnstructuredGrid()
-    point_data.SetPoints(VTKpoints)
-    xb_wall = np.reshape(x_vtk_mesh, (np.size(x_vtk_mesh[:]), 1))
-    yb_wall = np.reshape(y_vtk_mesh, (np.size(y_vtk_mesh[:]), 1))
-    u_wall_BC = np.linspace(0., 0., n_pointsw)
-    v_wall_BC = np.linspace(0., 0., n_pointsw)
-    xb = xb_wall
-    yb = yb_wall
-    ub = u_wall_BC
-    vb = v_wall_BC
+        xb[i] = pt_iso[0]
+        yb[i] = pt_iso[1]
+    ub = np.linspace(0., 0., n_pointsw).reshape(-1, 1)
+    vb = np.linspace(0., 0., n_pointsw).reshape(-1, 1)
 
-    xb = xb.reshape(-1, 1)  # need to reshape to get 2D array
-    yb = yb.reshape(-1, 1)  # need to reshape to get 2D array
-    ub = ub.reshape(-1, 1)  # need to reshape to get 2D array
-    vb = vb.reshape(-1, 1)  # need to reshape to get 2D array
-    print('shape of xb', xb.shape)
-    print('shape of yb', yb.shape)
-    print('shape of ub', ub.shape)
-
-    ##### Read data here#########
-    # !!specify pts location here:
-    x_data = [1., 1.2, 1.22, 1.31, 1.39]
-    y_data = [0.15, 0.07, 0.22, 0.036, 0.26]
-    z_data = [0., 0., 0., 0., 0.]
-
-    x_data = np.asarray(x_data)  # convert to numpy
-    y_data = np.asarray(y_data)  # convert to numpy
-
+    ##### Read ground truth data here#########
     print('Loading', File_data)
     reader = vtk.vtkXMLUnstructuredGridReader()
     reader.SetFileName(File_data)
     reader.Update()
     data_vtk = reader.GetOutput()
     n_points = data_vtk.GetNumberOfPoints()
+    all_array = data_vtk.GetPointData().GetArray(fieldname)
+    all_data_val = VN.vtk_to_numpy(all_array)
     print('n_points of the data file read:', n_points)
+    xVal = np.zeros((n_points, 1))
+    yVal = np.zeros((n_points, 1))
+    for i in range(n_points):
+        pt_iso = data_vtk.GetPoint(i)
+        xVal[i] = pt_iso[0]
+        yVal[i] = pt_iso[1]
+    xVal = xVal / X_scale
+    yVal = yVal / Y_scale
+    uVal = all_data_val[:, 0] / U_scale
+    vVal = all_data_val[:, 1] / U_scale
+    plot_results(xVal, yVal, uVal, vVal, "ground_truth")
 
+    # !!specify pts location here:
+    xd = np.asarray([1., 1.2, 1.22, 1.31, 1.39])
+    yd = np.asarray([0.15, 0.07, 0.22, 0.036, 0.26])
+    zd = np.asarray([0., 0., 0., 0., 0.])
     VTKpoints = vtk.vtkPoints()
-    for i in range(len(x_data)):
-        VTKpoints.InsertPoint(i, x_data[i], y_data[i], z_data[i])
-
+    for i in range(len(xd)):
+        VTKpoints.InsertPoint(i, xd[i], yd[i], zd[i])
     point_data = vtk.vtkUnstructuredGrid()
     point_data.SetPoints(VTKpoints)
-
     probe = vtk.vtkProbeFilter()
     probe.SetInputData(point_data)
     probe.SetSourceData(data_vtk)
     probe.Update()
     array = probe.GetOutput().GetPointData().GetArray(fieldname)
     data_vel = VN.vtk_to_numpy(array)
+    ud = data_vel[:, 0] / U_scale
+    vd = data_vel[:, 1] / U_scale
+    xd = xd / X_scale
+    yd = yd / Y_scale
 
-    data_vel_u = data_vel[:, 0] / U_scale
-    data_vel_v = data_vel[:, 1] / U_scale
-    x_data = x_data / X_scale
-    y_data = y_data / Y_scale
-
-    print('Using input data pts: pts: ', x_data, y_data)
-    print('Using input data pts: vel u: ', data_vel_u)
-    print('Using input data pts: vel v: ', data_vel_v)
-    xd = x_data.reshape(-1, 1)  # need to reshape to get 2D array
-    yd = y_data.reshape(-1, 1)  # need to reshape to get 2D array
-    ud = data_vel_u.reshape(-1, 1)  # need to reshape to get 2D array
-    vd = data_vel_v.reshape(-1, 1)  # need to reshape to get 2D array
-    return x, y, xb, yb, ub, vb, xd, yd, ud, vd
+    xd = xd.reshape(-1, 1)
+    yd = yd.reshape(-1, 1)
+    ud = ud.reshape(-1, 1)
+    vd = vd.reshape(-1, 1)
+    return x, y, xb, yb, ub, vb, xd, yd, ud, vd, xVal, yVal, uVal, vVal
 
 
-def plot_results(x, y, output_u, output_v):
+def plot_results(x, y, output_u, output_v, name='predict'):
     plt.figure()
     plt.subplot(2, 1, 1)
     plt.scatter(x, y, c=output_u, cmap='rainbow')
     plt.title('NN results, u')
     plt.colorbar()
-    plt.savefig('results_u.png', dpi=500)
+    plt.savefig('%s_u.png' % name, dpi=500)
     plt.clf()
     plt.close()
 
@@ -196,9 +136,10 @@ def plot_results(x, y, output_u, output_v):
     plt.scatter(x, y, c=output_v, cmap='rainbow')
     plt.title('NN results, v')
     plt.colorbar()
-    plt.savefig('results_v.png', dpi=500)
+    plt.savefig('%s_v.png' % name, dpi=500)
     plt.clf()
     plt.close()
+
 
 class Swish(nn.Module):
     def __init__(self, inplace=True):
@@ -268,8 +209,9 @@ def regression(pinn, xd, yd, ud, vd):
     v = outputs[:, [1]]
     return mse(u, ud) + mse(v, vd)
 
+
 def geo_train():
-    x_in, y_in, xb, yb, ub, vb, xd, yd, ud, vd = load_data()
+    x_in, y_in, xb, yb, ub, vb, xd, yd, ud, vd, xVal, yVal, uVal, vVal = load_data()
     x = torch.Tensor(x_in).to(device)
     y = torch.Tensor(y_in).to(device)
     xb = torch.Tensor(xb).to(device)
@@ -278,6 +220,11 @@ def geo_train():
     yd = torch.Tensor(yd).to(device)
     ud = torch.Tensor(ud).to(device)
     vd = torch.Tensor(vd).to(device)
+    xVal = torch.Tensor(xVal).to(device)
+    yVal = torch.Tensor(yVal).to(device)
+    uVal = torch.Tensor(uVal).to(device)
+    vVal = torch.Tensor(vVal).to(device)
+
     dataset = TensorDataset(x, y)
     dataloader = DataLoader(dataset, batch_size=batchsize, shuffle=True, num_workers=0, drop_last=True)
     pinn = create_model().to(device)
@@ -316,11 +263,15 @@ def geo_train():
         print('learning rate is: %.8f' % opt.param_groups[0]['lr'])
 
     print("elapse time in parallel = %i" % (time.time() - tic))
-    net_in = torch.cat((x.requires_grad_(), y.requires_grad_()), 1)
-    outputs = pinn(net_in).cpu().data.numpy()  #evaluate model (runs out of memory for large GPU problems!)
-    u = outputs[:, [0]]
-    v = outputs[:, [1]]
-    plot_results(x_in, y_in, u, v)
+    net_in = torch.cat((xVal.requires_grad_(), yVal.requires_grad_()), 1)
+    outputs = pinn(net_in)  #evaluate model (runs out of memory for large GPU problems!)
+    uPred = outputs[:, [0]]
+    vPred = outputs[:, [1]]
+    val_loss_u = mse(uPred, uVal)
+    val_loss_v = mse(vPred, vVal)
+    print('*****Validation loss: val_loss_u %.8f val_loss_v %.8f*****' %
+          (val_loss_u.item(), val_loss_v.item()))
+    plot_results(xVal.detach().cpu().numpy(), yVal.detach().cpu().numpy(), uPred.detach().cpu().numpy(), vPred.detach().cpu().numpy())
     return
 
 
