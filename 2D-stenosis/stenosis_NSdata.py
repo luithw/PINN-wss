@@ -12,8 +12,8 @@ from vtk.util import numpy_support as VN
 
 
 batchsize = 256
-# epochs = 5500
-epochs = 30
+epochs = 5500
+# epochs = 1
 learning_rate = 5e-4 #starting learning rate
 step_epoch = 1200 #1000
 decay_rate = 0.1 # 0.1
@@ -49,12 +49,11 @@ def load_data():
     data_vtk = reader.GetOutput()
     n_points = data_vtk.GetNumberOfPoints()
     print('n_points of the mesh:', n_points)
-    x = np.zeros((n_points, 1))
-    y = np.zeros((n_points, 1))
+    xy_f = np.zeros((n_points, 2))
     for i in range(n_points):
         pt_iso = data_vtk.GetPoint(i)
-        x[i] = pt_iso[0]
-        y[i] = pt_iso[1]
+        xy_f[i, 0] = pt_iso[0]
+        xy_f[i, 1] = pt_iso[1]
 
     print('Loading', bc_file_wall)
     reader = vtk.vtkUnstructuredGridReader()
@@ -63,14 +62,11 @@ def load_data():
     data_vtk = reader.GetOutput()
     n_pointsw = data_vtk.GetNumberOfPoints()
     print('n_points of at wall', n_pointsw)
-    xb = np.zeros((n_pointsw, 1))
-    yb = np.zeros((n_pointsw, 1))
+    xy_b = np.zeros((n_pointsw, 2))
     for i in range(n_pointsw):
         pt_iso = data_vtk.GetPoint(i)
-        xb[i] = pt_iso[0]
-        yb[i] = pt_iso[1]
-    ub = np.linspace(0., 0., n_pointsw).reshape(-1, 1)
-    vb = np.linspace(0., 0., n_pointsw).reshape(-1, 1)
+        xy_b[i, 0] = pt_iso[0]
+        xy_b[i, 1] = pt_iso[1]
 
     ##### Read ground truth data here#########
     print('Loading', File_data)
@@ -79,20 +75,14 @@ def load_data():
     reader.Update()
     data_vtk = reader.GetOutput()
     n_points = data_vtk.GetNumberOfPoints()
-    all_array = data_vtk.GetPointData().GetArray(fieldname)
-    all_data_val = VN.vtk_to_numpy(all_array)
     print('n_points of the data file read:', n_points)
-    xVal = np.zeros((n_points, 1))
-    yVal = np.zeros((n_points, 1))
+    xy_val = np.zeros((n_points, 2))
     for i in range(n_points):
         pt_iso = data_vtk.GetPoint(i)
-        xVal[i] = pt_iso[0]
-        yVal[i] = pt_iso[1]
-    xVal = xVal / X_scale
-    yVal = yVal / Y_scale
-    uVal = all_data_val[:, 0] / U_scale
-    vVal = all_data_val[:, 1] / U_scale
-    plot_results(xVal, yVal, uVal, vVal, "ground_truth")
+        xy_val[i, 0] = pt_iso[0] / X_scale
+        xy_val[i, 1] = pt_iso[1] / Y_scale
+    all_array = data_vtk.GetPointData().GetArray(fieldname)
+    uv_sol = VN.vtk_to_numpy(all_array) / U_scale
 
     # !!specify pts location here:
     xd = np.asarray([1., 1.2, 1.22, 1.31, 1.39])
@@ -108,35 +98,29 @@ def load_data():
     probe.SetSourceData(data_vtk)
     probe.Update()
     array = probe.GetOutput().GetPointData().GetArray(fieldname)
-    data_vel = VN.vtk_to_numpy(array)
-    ud = data_vel[:, 0] / U_scale
-    vd = data_vel[:, 1] / U_scale
+    uv_d = VN.vtk_to_numpy(array) / U_scale
     xd = xd / X_scale
     yd = yd / Y_scale
-
-    xd = xd.reshape(-1, 1)
-    yd = yd.reshape(-1, 1)
-    ud = ud.reshape(-1, 1)
-    vd = vd.reshape(-1, 1)
-    return x, y, xb, yb, ub, vb, xd, yd, ud, vd, xVal, yVal, uVal, vVal
+    xy_d = np.stack([xd, yd], 1)
+    return xy_f, xy_b, xy_d, uv_d, xy_val, uv_sol
 
 
-def plot_results(x, y, output_u, output_v, name='predict'):
-    plt.figure()
-    plt.subplot(2, 1, 1)
-    plt.scatter(x, y, c=output_u, cmap='rainbow')
-    plt.title('NN results, u')
-    plt.colorbar()
-    plt.savefig('%s_u.png' % name, dpi=500)
-    plt.clf()
-    plt.close()
+def plot_results(xy_val, uv_sol, uv_pred):
+    fig, axs = plt.subplots(2, 2, figsize=(12, 6))
 
-    plt.figure()
-    plt.subplot(2, 1, 1)
-    plt.scatter(x, y, c=output_v, cmap='rainbow')
-    plt.title('NN results, v')
-    plt.colorbar()
-    plt.savefig('%s_v.png' % name, dpi=500)
+    axs[0, 0].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_pred[:, 0], cmap='rainbow')
+    axs[0, 0].set_title('Predict U')
+
+    axs[0, 1].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_sol[:, 0], cmap='rainbow')
+    axs[0, 1].set_title('GT U')
+
+    axs[1, 0].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_pred[:, 1], cmap='rainbow')
+    axs[1, 0].set_title('Predict U')
+
+    axs[1, 1].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_sol[:, 1], cmap='rainbow')
+    axs[1, 1].set_title('GT U')
+
+    plt.savefig('results.png', dpi=500)
     plt.clf()
     plt.close()
 
@@ -167,10 +151,12 @@ def create_model():
     return pinn
 
 
-def residual(pinn, x, y):
+def residual(pinn, xy):
+    x = xy[:, [0]]
+    y = xy[:, [1]]
     x.requires_grad = True
     y.requires_grad = True
-    outputs = pinn(torch.cat((x, y), 1))
+    outputs = pinn(torch.cat([x, y], 1))
     u = outputs[:, [0]]
     v = outputs[:, [1]]
     p = outputs[:, [2]]
@@ -196,36 +182,33 @@ def residual(pinn, x, y):
     return (loss_1 ** 2).mean() + (loss_2 ** 2).mean() + (loss_3 ** 2).mean()
 
 
-def boundary(pinn, xb, yb):
-    outputs = pinn(torch.cat((xb, yb), 1))
+def boundary(pinn, xy_b):
+    outputs = pinn(xy_b)
     u = outputs[:, [0]]
     v = outputs[:, [1]]
     return (u**2).mean() + (v**2).mean()
 
 
-def regression(pinn, xd, yd, ud, vd):
-    outputs = pinn(torch.cat((xd, yd), 1))
+def regression(pinn, xy_d, uv_d):
+    outputs = pinn(xy_d)
     u = outputs[:, [0]]
     v = outputs[:, [1]]
+    ud = uv_d[:, [0]]
+    vd = uv_d[:, [0]]
     return mse(u, ud) + mse(v, vd)
 
 
 def geo_train():
-    x_in, y_in, xb, yb, ub, vb, xd, yd, ud, vd, xVal, yVal, uVal, vVal = load_data()
-    x = torch.Tensor(x_in).to(device)
-    y = torch.Tensor(y_in).to(device)
-    xb = torch.Tensor(xb).to(device)
-    yb = torch.Tensor(yb).to(device)
-    xd = torch.Tensor(xd).to(device)
-    yd = torch.Tensor(yd).to(device)
-    ud = torch.Tensor(ud).to(device)
-    vd = torch.Tensor(vd).to(device)
-    xVal = torch.Tensor(xVal).to(device)
-    yVal = torch.Tensor(yVal).to(device)
-    uVal = torch.Tensor(uVal).to(device)
-    vVal = torch.Tensor(vVal).to(device)
+    xy_f, xy_b, xy_d, uv_d, xy_val, uv_sol = load_data()
 
-    dataset = TensorDataset(x, y)
+    xy_f = torch.Tensor(xy_f).to(device)
+    xy_b = torch.Tensor(xy_b).to(device)
+    xy_d = torch.Tensor(xy_d).to(device)
+    uv_d = torch.Tensor(uv_d).to(device)
+    xy_val = torch.Tensor(xy_val).to(device)
+    uv_sol = torch.Tensor(uv_sol).to(device)
+
+    dataset = TensorDataset(xy_f)
     dataloader = DataLoader(dataset, batch_size=batchsize, shuffle=True, num_workers=0, drop_last=True)
     pinn = create_model().to(device)
     opt = optim.Adam(pinn.parameters(), lr=learning_rate, betas=(0.9, 0.99), eps=10**-15)
@@ -237,11 +220,11 @@ def geo_train():
         residual_loss_tot = 0.
         mse_b_tot = 0.
         mse_0_tot = 0.
-        for batch_idx, (x_batch, y_batch) in enumerate(dataloader):
+        for batch_idx, (x_y_batch, ) in enumerate(dataloader):
             pinn.zero_grad()
-            residual_loss = residual(pinn, x_batch, y_batch)
-            mse_b = boundary(pinn, xb, yb)
-            mse_0 = regression(pinn, xd, yd, ud, vd)
+            residual_loss = residual(pinn, x_y_batch)
+            mse_b = boundary(pinn, xy_b)
+            mse_0 = regression(pinn, xy_d, uv_d)
             loss = residual_loss + Lambda_BC * mse_b + Lambda_data*mse_0
             loss.backward()
             opt.step()
@@ -250,7 +233,7 @@ def geo_train():
             mse_0_tot += mse_0
             if batch_idx % 40 == 0:
                 print('Train Epoch: %i [%i/%i (%.0f %%)] - residual_loss %.10f mse_b %.8f mse_0 %.8f' %
-                      (epoch, batch_idx * len(x_batch), len(dataloader.dataset),
+                      (epoch, batch_idx * len(x_y_batch), len(dataloader.dataset),
                     100. * batch_idx / len(dataloader), residual_loss.item(), mse_b.item(), mse_0.item()))
             scheduler.step()
         residual_loss_tot /= len(dataloader)
@@ -261,15 +244,12 @@ def geo_train():
         print('learning rate is: %.8f' % opt.param_groups[0]['lr'])
 
     print("elapse time in parallel = %i" % (time.time() - tic))
-    net_in = torch.cat((xVal.requires_grad_(), yVal.requires_grad_()), 1)
-    outputs = pinn(net_in)  #evaluate model (runs out of memory for large GPU problems!)
-    uPred = outputs[:, [0]]
-    vPred = outputs[:, [1]]
-    val_loss_u = mse(uPred, uVal)
-    val_loss_v = mse(vPred, vVal)
+    uv_pred = pinn(xy_val)  #evaluate model (runs out of memory for large GPU problems!)
+    val_loss_u = mse(uv_pred[:, 0], uv_sol[:, 0])
+    val_loss_v = mse(uv_pred[:, 1], uv_sol[:, 1])
     print('*****Validation loss: val_loss_u %.8f val_loss_v %.8f*****' %
           (val_loss_u.item(), val_loss_v.item()))
-    plot_results(xVal.detach().cpu().numpy(), yVal.detach().cpu().numpy(), uPred.detach().cpu().numpy(), vPred.detach().cpu().numpy())
+    plot_results(xy_val.detach().cpu().numpy(), uv_sol.detach().cpu().numpy(), uv_pred.detach().cpu().numpy())
     return
 
 
