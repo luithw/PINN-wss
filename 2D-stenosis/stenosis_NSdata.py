@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 #import foamFileOperation
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 #from mpl_toolkits.mplot3d import Axes3D
 from torch.autograd import Variable
@@ -569,18 +571,29 @@ def geo_train(device,x_in,y_in,xb,yb,ub,vb,xd,yd,ud,vd,batchsize,learning_rate,e
 
 
 
-	plt.figure()
-	plt.subplot(2, 1, 1)
-	plt.scatter(x.detach().numpy(), y.detach().numpy(), c = output_u , cmap = 'rainbow')
-	plt.title('NN results, u')
-	plt.colorbar()
-	plt.show()
-	plt.figure()
-	plt.subplot(2, 1, 1)
+	# plt.figure()
+	# plt.subplot(2, 1, 1)
+	# plt.scatter(x.detach().numpy(), y.detach().numpy(), c = output_u , cmap = 'rainbow')
+	# plt.title('NN results, u')
+	# plt.colorbar()
+	# # plt.show()
+	# plt.figure()
+	# plt.subplot(2, 1, 1)
+	# plt.scatter(x.detach().numpy(), y.detach().numpy(), c = output_v , cmap = 'rainbow')
+	# plt.title('NN results, v')
+	# plt.colorbar()
+	# # plt.show()
+
+	fig, axs = plt.subplots(2, 1, figsize=(6, 6))
+	axs[0].scatter(x.detach().numpy(), y.detach().numpy(), c = output_u , cmap = 'rainbow')
+	axs[0].set_title('Predict U')
+
 	plt.scatter(x.detach().numpy(), y.detach().numpy(), c = output_v , cmap = 'rainbow')
-	plt.title('NN results, v')
-	plt.colorbar()
-	plt.show()
+	axs[1].set_title('Predict V')
+
+	plt.savefig('original_results.png', dpi=500)
+	plt.clf()
+	plt.close()
 
 
 
@@ -614,7 +627,7 @@ Lambda_BC  = 20.
 Lambda_data = 1.
 
 #Directory = "/home/aa3878/Data/ML/Amir/stenosis/"
-Directory = "/scratch/aa3878/PINN/stenosis/PINN/"
+Directory = "data/"
 mesh_file = Directory + "sten_mesh000000.vtu"
 bc_file_in = Directory + "inlet_BC.vtk"
 bc_file_wall = Directory + "wall_BC.vtk"
