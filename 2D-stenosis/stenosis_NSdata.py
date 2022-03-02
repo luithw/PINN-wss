@@ -7,7 +7,12 @@ from torch.utils.data import DataLoader, TensorDataset,RandomSampler
 import time
 import vtk
 from vtk.util import numpy_support as VN
+import random
 
+torch.use_deterministic_algorithms(True)
+torch.manual_seed(0)
+random.seed(0)
+np.random.seed(0)
 
 device = torch.device("cuda")
 Flag_batch = True
@@ -208,7 +213,7 @@ class Swish(nn.Module):
         else:
             return x * torch.sigmoid(x)
 
-def create_model():
+def create_model(n_hid):
     layers = []
     for i in range(len(n_hid) - 1):
         if i > 0:
@@ -234,9 +239,9 @@ def geo_train():
     vd = torch.Tensor(vd).to(device)
     dataset = TensorDataset(x, y)
     dataloader = DataLoader(dataset, batch_size=batchsize, shuffle=True, num_workers=0, drop_last=True)
-    net_u = create_model().to(device)
-    net_v = create_model().to(device)
-    net_p = create_model().to(device)
+    net_u = create_model([input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]).to(device)
+    net_v = create_model([input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]).to(device)
+    net_p = create_model([input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]).to(device)
 
     def criterion(x, y):
         x.requires_grad = True
