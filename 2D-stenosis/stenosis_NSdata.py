@@ -11,7 +11,7 @@ import vtk
 from vtk.util import numpy_support as VN
 import random
 
-torch.use_deterministic_algorithms(True)
+# torch.use_deterministic_algorithms(True)
 torch.manual_seed(0)
 random.seed(0)
 np.random.seed(0)
@@ -32,6 +32,7 @@ fieldname = 'f_5-0' #The velocity field name in the vtk file (see from ParaView)
 
 batchsize = 256
 epochs  = 5500
+epochs  = 1
 Diff = 0.001
 rho = 1.
 T = 0.5 #total duraction
@@ -190,18 +191,16 @@ def load_data():
 
 
 def plot_results(x, y, output_u, output_v):
-    plt.figure()
-    plt.subplot(2, 1, 1)
-    plt.scatter(x.detach().numpy(), y.detach().numpy(), c=output_u, cmap='rainbow')
-    plt.title('NN results, u')
-    plt.colorbar()
-    plt.show()
-    plt.figure()
-    plt.subplot(2, 1, 1)
-    plt.scatter(x.detach().numpy(), y.detach().numpy(), c=output_v, cmap='rainbow')
-    plt.title('NN results, v')
-    plt.colorbar()
-    plt.show()
+    fig, axs = plt.subplots(2, 1, figsize=(6, 6))
+    axs[0].scatter(x.detach().cpu().numpy(), y.detach().cpu().numpy(), c=output_u, cmap='rainbow')
+    axs[0].set_title('Predict U')
+
+    plt.scatter(x.detach().cpu().numpy(), y.detach().cpu().numpy(), c=output_v, cmap='rainbow')
+    axs[1].set_title('Predict V')
+
+    plt.savefig('refactored_1_results.png', dpi=500)
+    plt.clf()
+    plt.close()
 
 class Swish(nn.Module):
     def __init__(self, inplace=True):
@@ -351,7 +350,7 @@ def geo_train():
     net_in = torch.cat((x.requires_grad_(), y.requires_grad_()), 1)
     output_u = net_u(net_in).cpu().data.numpy()  #evaluate model (runs out of memory for large GPU problems!)
     output_v = net_v(net_in).cpu().data.numpy()  #evaluate model
-    plot_results(x_in, y_in, output_u, output_v)
+    plot_results(x, y, output_u, output_v)
     return
 
 
