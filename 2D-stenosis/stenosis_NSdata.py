@@ -235,7 +235,7 @@ def geo_train():
                 print('Train Epoch: %i [%i/%i (%.0f %%)] - residual_loss %.10f mse_b %.8f mse_0 %.8f' %
                       (epoch, batch_idx * len(x_y_batch), len(dataloader.dataset),
                     100. * batch_idx / len(dataloader), residual_loss.item(), mse_b.item(), mse_0.item()))
-            scheduler.step()
+        scheduler.step()
         residual_loss_tot /= len(dataloader)
         mse_b_tot /= len(dataloader)
         mse_0_tot /= len(dataloader)
