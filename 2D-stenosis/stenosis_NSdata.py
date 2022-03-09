@@ -32,7 +32,6 @@ fieldname = 'f_5-0' #The velocity field name in the vtk file (see from ParaView)
 
 batchsize = 256
 epochs  = 5500
-epochs  = 1
 Diff = 0.001
 rho = 1.
 T = 0.5 #total duraction
@@ -215,17 +214,28 @@ class Swish(nn.Module):
             return x * torch.sigmoid(x)
 
 def create_model(n_hid):
-    layers = []
-    for i in range(len(n_hid) - 1):
-        if i > 0:
-            layers.append(Swish())
-        layer = nn.Linear(n_hid[i], n_hid[i + 1])
-        nn.init.kaiming_normal_(layer.weight)
-        layers.append(layer)
+    class Net(nn.Module):
 
-    pinn = nn.Sequential(*layers)
-    pinn.to(device)
-    return pinn
+        # The __init__ function stack the layers of the
+        # network Sequentially
+        def __init__(self):
+            super().__init__()
+            layers = []
+            for i in range(len(n_hid) - 1):
+                if i > 0:
+                    layers.append(Swish())
+                layer = nn.Linear(n_hid[i], n_hid[i + 1])
+                nn.init.kaiming_normal_(layer.weight)
+                layers.append(layer)
+
+            self.main = nn.Sequential(*layers)
+
+        # This function defines the forward rule of
+        # output respect to input.
+        def forward(self, x):
+            output = self.main(x)
+            return output
+    return Net()
 
 
 def geo_train():
@@ -243,6 +253,10 @@ def geo_train():
     net_u = create_model([input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]).to(device)
     net_v = create_model([input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]).to(device)
     net_p = create_model([input_n, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]).to(device)
+
+    net_u.load_state_dict(torch.load(path + "sten_data_u" + ".pt"))
+    net_v.load_state_dict(torch.load(path + "sten_data_v" + ".pt"))
+    net_p.load_state_dict(torch.load(path + "sten_data_p" + ".pt"))
 
     def criterion(x, y):
         x.requires_grad = True
@@ -337,9 +351,9 @@ def geo_train():
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss eqn {:.10f} Loss BC {:.8f} Loss data {:.8f}'.format(
                     epoch, batch_idx * len(x_in), len(dataloader.dataset),
                     100. * batch_idx / len(dataloader), loss_eqn.item(), loss_bc.item(),loss_data.item()))
-            scheduler_u.step()
-            scheduler_v.step()
-            scheduler_p.step()
+        scheduler_u.step()
+        scheduler_v.step()
+        scheduler_p.step()
         loss_eqn_tot /= n
         loss_bc_tot /= n
         loss_data_tot /= n
