@@ -108,19 +108,19 @@ def load_data():
 def plot_results(xy_val, uv_sol, uv_pred):
     fig, axs = plt.subplots(2, 2, figsize=(12, 6))
 
-    axs[0, 0].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_pred[:, 0], cmap='rainbow')
-    axs[0, 0].set_title('Predict U')
+    axs[0, 0].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_sol[:, 0], cmap='rainbow')
+    axs[0, 0].set_title('GT U')
 
-    axs[0, 1].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_sol[:, 0], cmap='rainbow')
-    axs[0, 1].set_title('GT U')
+    axs[0, 1].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_pred[:, 0], cmap='rainbow')
+    axs[0, 1].set_title('Predict U')
 
-    axs[1, 0].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_pred[:, 1], cmap='rainbow')
-    axs[1, 0].set_title('Predict U')
+    axs[1, 0].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_sol[:, 1], cmap='rainbow')
+    axs[1, 0].set_title('GT U')
 
-    axs[1, 1].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_sol[:, 1], cmap='rainbow')
-    axs[1, 1].set_title('GT U')
+    axs[1, 1].scatter(xy_val[:, 0], xy_val[:, 1], c=uv_pred[:, 1], cmap='rainbow')
+    axs[1, 1].set_title('Predict U')
 
-    plt.savefig('results.png', dpi=500)
+    plt.savefig('debug_main_results.png', dpi=500)
     plt.clf()
     plt.close()
 
