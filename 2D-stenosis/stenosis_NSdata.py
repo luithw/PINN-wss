@@ -270,7 +270,7 @@ def regression(pinn, xy_d, uv_d):
     u = outputs[:, [0]]
     v = outputs[:, [1]]
     ud = uv_d[:, [0]]
-    vd = uv_d[:, [0]]
+    vd = uv_d[:, [1]]
     return mse(u, ud) + mse(v, vd)
 
 
